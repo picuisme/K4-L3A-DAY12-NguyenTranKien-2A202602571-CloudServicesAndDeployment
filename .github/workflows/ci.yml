@@ -1,0 +1,93 @@
+# CI/CD — test → build → (chỉ trên main, sau khi xanh) deploy → smoke test
+#
+# Secrets/Variables đặt ở: repo → Settings → Secrets and variables → Actions
+#   secrets.RENDER_DEPLOY_HOOK   (nếu dùng Render)  — Deploy Hook URL của service
+#   secrets.RAILWAY_TOKEN        (nếu dùng Railway) — Project token
+#   vars.RAILWAY_SERVICE         (nếu dùng Railway) — tên service agent
+#   vars.PUBLIC_URL              — URL công khai, dùng cho smoke test
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run checkpoint tests (CP1–CP4, không cần bản deploy)
+        env:
+          AGENT_API_KEY: ci-dummy
+          REDIS_URL: "fake://"
+        run: pytest tests/ -v -m "not docker" --ignore=tests/test_cp5.py --ignore=tests/test_bonus_cicd.py
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t day12-agent:ci .
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name agent -p 8000:8000 \
+            -e AGENT_API_KEY=ci-dummy -e REDIS_URL=fake:// day12-agent:ci
+          for i in $(seq 1 20); do
+            curl -fsS http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          docker logs agent
+          exit 1
+
+  deploy:
+    name: deploy
+    needs: [test, build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE: ${{ vars.RAILWAY_SERVICE }}
+      PUBLIC_URL: ${{ vars.PUBLIC_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Render (deploy hook)
+        if: env.RENDER_DEPLOY_HOOK != ''
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+
+      - name: Deploy to Railway
+        if: env.RENDER_DEPLOY_HOOK == '' && env.RAILWAY_TOKEN != ''
+        run: npx --yes @railway/cli@4 up --ci --service "$RAILWAY_SERVICE"
+
+      - name: No deploy target configured
+        if: env.RENDER_DEPLOY_HOOK == '' && env.RAILWAY_TOKEN == ''
+        run: echo "Chưa cấu hình RENDER_DEPLOY_HOOK hoặc RAILWAY_TOKEN — bỏ qua bước deploy."
+
+      - name: Smoke test after deploy
+        if: env.PUBLIC_URL != '' && (env.RENDER_DEPLOY_HOOK != '' || env.RAILWAY_TOKEN != '')
+        run: |
+          sleep 60
+          for i in $(seq 1 10); do
+            curl -fsS "$PUBLIC_URL/health" && exit 0
+            sleep 15
+          done
+          exit 1
