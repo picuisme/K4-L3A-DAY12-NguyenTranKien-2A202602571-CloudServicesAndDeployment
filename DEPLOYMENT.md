@@ -10,9 +10,9 @@
 
 | Mục | Nội dung |
 |-----|----------|
-| Họ và tên | (điền họ tên) |
-| Mã học viên | (điền mã học viên) |
-| Repo | (điền link repo K4-L3A-DAY12-HoVaTen-MSSV-CloudServicesAndDeployment) |
+| Họ và tên | Nguyễn Trần Kiên |
+| Mã học viên | 2A202602571 |
+| Repo | https://github.com/picuisme/K4-L3A-DAY12-NguyenTranKien-2A202602571-CloudServicesAndDeployment |
 
 ## Service
 
